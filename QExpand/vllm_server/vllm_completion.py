@@ -24,7 +24,7 @@ class VLLMCompletion(object):
         # Initialize vLLM using the new LLM class
         self.engine = LLM(
             model=model_name,
-            gpu_memory_utilization=0.9,
+            gpu_memory_utilization=0.8,
             max_model_len=32768,
             tensor_parallel_size=MY_GPU_COUNT,
             dtype="bfloat16",

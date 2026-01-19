@@ -726,8 +726,8 @@ def retrieval_reasonir(queries,query_ids,documents,doc_ids,task,instructions,mod
     # NOTE: HF version does not come with pooling function, need to add it manually.
     customized_checkpoint = kwargs.get('checkpoint',None)
     if customized_checkpoint is None:
-        # customized_checkpoint = 'reasonir/ReasonIR-8B'
-        customized_checkpoint = '../model/reasonir__ReasonIR-8B'  # reasonir检索
+        customized_checkpoint = 'reasonir/ReasonIR-8B'
+        # customized_checkpoint = '../model/reasonir__ReasonIR-8B'  # reasonir检索
     else:
         print('use',customized_checkpoint)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -871,7 +871,7 @@ def retrieval_rader(queries,query_ids,documents,doc_ids,task,model_id,instructio
 from vllm.transformers_utils.tokenizer import get_tokenizer as get_vllm_tokenizer
 class Qwen3EmbeddingModel:
     def __init__(self, model_path, max_length=16384, device="auto"):
-        self.model = LLM(model=model_path, task="embed", gpu_memory_utilization=0.9, tensor_parallel_size=torch.cuda.device_count())
+        self.model = LLM(model=model_path, task="embed", gpu_memory_utilization=0.7, tensor_parallel_size=torch.cuda.device_count())
         self.task = 'Given a web search query, retrieve relevant passages that answer the query'
         self.max_length = max_length 
         self.tokenizer = get_vllm_tokenizer(model_path, trust_remote_code=False)
@@ -909,7 +909,7 @@ def retrieval_qwen3_ft_diver(queries,query_ids,documents,doc_ids,task,model_id,i
     cache_model_name = kwargs.get('model_name', 'diver')
     batch_size = kwargs.get('encode_batch_size',1)
 
-    model_path = '../models/Diver-Retriever-4B'
+    model_path = 'AQ-MedAI/Diver-Retriever-4B-1020'
     model = Qwen3EmbeddingModel(model_path, max_length=16384)
 
     # Check if documents are already encoded 
@@ -960,7 +960,117 @@ def retrieval_qwen3_ft_diver(queries,query_ids,documents,doc_ids,task,model_id,i
         print("Dedup Scores shape:", len(scores[0]))
     return get_scores(query_ids=query_ids,doc_ids=doc_ids,scores=scores,excluded_ids=excluded_ids)
 
+@torch.no_grad()
+def retrieval_qwen3(queries,query_ids,documents,doc_ids,task,model_id,instructions,cache_dir,excluded_ids,long_context,**kwargs):
+    cache_model_name = kwargs.get('model_name', 'qwen3-4b')
+    batch_size = kwargs.get('encode_batch_size',1)
 
+    model_path = 'Qwen/Qwen3-Embedding-4B'
+    model = Qwen3EmbeddingModel(model_path, max_length=16384)
+
+    # Check if documents are already encoded 
+    document_postfix = '_'+kwargs['document_postfix'] if len(kwargs['document_postfix']) > 0 else ''
+    cache_doc_emb_dir = os.path.join(cache_dir, 'doc_emb'+document_postfix, cache_model_name, task, f"long_{long_context}")
+    os.makedirs(cache_doc_emb_dir, exist_ok=True)
+    cur_cache_file = os.path.join(cache_doc_emb_dir, f'0.npy')
+
+    if os.path.isfile(cur_cache_file):
+        doc_emb = np.load(cur_cache_file,allow_pickle=True)
+    else:
+        doc_emb = []
+        with torch.inference_mode():
+            doc_emb = model.embed_docs(documents)
+        torch.cuda.empty_cache() 
+        
+        # Convert to numpy array and save
+        doc_emb = np.array(doc_emb)
+        np.save(cur_cache_file, doc_emb)
+    print("Shape of doc emb", doc_emb.shape)
+
+    query_emb = []
+    with torch.inference_mode():
+        query_emb = model.embed_queries(queries)
+    query_emb = np.array(query_emb)
+    print("Shape of query emb", query_emb.shape)
+
+    # Find cosine similarity between doc_emb and query_emb
+    scores = cosine_similarity(query_emb, doc_emb)
+    print("Scores shape", scores.shape)
+    scores = scores.tolist()
+
+    if len(kwargs['document_postfix']) > 0:  # rechunk setting
+        dedup_doc_ids = set(doc_ids)
+        dedup_scores = []  # shape:[len(scores), len(dedup_doc_ids)], save only the best score for each query-doc pair
+        for query_idx in range(len(query_emb)):
+            best_scores = {}  # for each query, save the best score for each doc_id
+            for idx, score in enumerate(scores[query_idx]):
+                doc_id = doc_ids[idx]
+                if doc_id not in best_scores or score > best_scores[doc_id]:
+                    best_scores[doc_id] = score
+            q_doc_scores = []
+            for doc_id in dedup_doc_ids:
+                q_doc_scores.append(best_scores.get(doc_id))
+            dedup_scores.append(q_doc_scores)
+
+        doc_ids, scores = dedup_doc_ids, dedup_scores
+        print("Dedup Scores shape:", len(scores[0]))
+    return get_scores(query_ids=query_ids,doc_ids=doc_ids,scores=scores,excluded_ids=excluded_ids)
+
+@torch.no_grad()
+def retrieval_inf_retriever_v1(queries,query_ids,documents,doc_ids,task,model_id,instructions,cache_dir,excluded_ids,long_context,**kwargs):
+    cache_model_name = kwargs.get('model_name', 'inf-retriever-v1')
+    batch_size = kwargs.get('encode_batch_size',1)
+
+    model_path = 'infly/inf-retriever-v1-pro'
+    model = Qwen3EmbeddingModel(model_path, max_length=16384)
+
+    # Check if documents are already encoded 
+    document_postfix = '_'+kwargs['document_postfix'] if len(kwargs['document_postfix']) > 0 else ''
+    cache_doc_emb_dir = os.path.join(cache_dir, 'doc_emb'+document_postfix, cache_model_name, task, f"long_{long_context}")
+    os.makedirs(cache_doc_emb_dir, exist_ok=True)
+    cur_cache_file = os.path.join(cache_doc_emb_dir, f'0.npy')
+
+    if os.path.isfile(cur_cache_file):
+        doc_emb = np.load(cur_cache_file,allow_pickle=True)
+    else:
+        doc_emb = []
+        with torch.inference_mode():
+            doc_emb = model.embed_docs(documents)
+        torch.cuda.empty_cache() 
+        
+        # Convert to numpy array and save
+        doc_emb = np.array(doc_emb)
+        np.save(cur_cache_file, doc_emb)
+    print("Shape of doc emb", doc_emb.shape)
+
+    query_emb = []
+    with torch.inference_mode():
+        query_emb = model.embed_queries(queries)
+    query_emb = np.array(query_emb)
+    print("Shape of query emb", query_emb.shape)
+
+    # Find cosine similarity between doc_emb and query_emb
+    scores = cosine_similarity(query_emb, doc_emb)
+    print("Scores shape", scores.shape)
+    scores = scores.tolist()
+
+    if len(kwargs['document_postfix']) > 0:  # rechunk setting
+        dedup_doc_ids = set(doc_ids)
+        dedup_scores = []  # shape:[len(scores), len(dedup_doc_ids)], save only the best score for each query-doc pair
+        for query_idx in range(len(query_emb)):
+            best_scores = {}  # for each query, save the best score for each doc_id
+            for idx, score in enumerate(scores[query_idx]):
+                doc_id = doc_ids[idx]
+                if doc_id not in best_scores or score > best_scores[doc_id]:
+                    best_scores[doc_id] = score
+            q_doc_scores = []
+            for doc_id in dedup_doc_ids:
+                q_doc_scores.append(best_scores.get(doc_id))
+            dedup_scores.append(q_doc_scores)
+
+        doc_ids, scores = dedup_doc_ids, dedup_scores
+        print("Dedup Scores shape:", len(scores[0]))
+    return get_scores(query_ids=query_ids,doc_ids=doc_ids,scores=scores,excluded_ids=excluded_ids)
 
 RETRIEVAL_FUNCS = {
     'sf': retrieval_sf_qwen_e5,
@@ -984,4 +1094,6 @@ RETRIEVAL_FUNCS = {
     'reasonir': retrieval_reasonir,
     'rader': retrieval_rader,
     'diver-retriever': retrieval_qwen3_ft_diver,
+    'qwen3-4b': retrieval_qwen3,
+    'inf-retriever-v1': retrieval_inf_retriever_v1,
 }

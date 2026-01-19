@@ -8,6 +8,7 @@ from transformers import AutoTokenizer
 from vllm_server.vllm_completion import VLLMCompletion
 import json
 from utils.common import save_json, save_json_dict_format
+from utils.eval_util import calculate_retrieval_metrics
 from datasets import load_dataset
 import re
 from prompts import get_prompt
@@ -59,7 +60,7 @@ def get_scores(query_ids,doc_ids,scores,excluded_ids, return_full_scores=False, 
 class Qwen3EmbeddingModel:
     def __init__(self, model_path, device="auto"):
         # if device == "auto":
-        self.model = AutoModel.from_pretrained(model_path, attn_implementation="flash_attention_2", torch_dtype=torch.float16, device_map="auto")
+        self.model = AutoModel.from_pretrained(model_path, attn_implementation="flash_attention_2", dtype=torch.float16, device_map="auto")
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side='left')
         self.task = "Given a web search query, retrieve relevant passages that answer the query"
 
@@ -209,10 +210,7 @@ def main():
     parser.add_argument('--model_path', type=str, default='./qwen-4b-embedding')
     parser.add_argument('--model_name', type=str, default='qwen3_4b')
     parser.add_argument('--dataset_source', type=str, default='../data/BRIGHT')
-    parser.add_argument('--task', type=str, required=True,
-                        choices=['biology','earth_science','economics','pony','psychology','robotics',
-                                 'stackoverflow','sustainable_living','aops','leetcode','theoremqa_theorems',
-                                 'theoremqa_questions'])
+    parser.add_argument('--task', type=str, required=True)
     parser.add_argument('--cache_dir', type=str, default='cache')
     parser.add_argument('--document_expansion', type=str, default=None)
     

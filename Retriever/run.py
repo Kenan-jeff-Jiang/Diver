@@ -13,14 +13,11 @@ from datasets import load_dataset, Dataset
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, required=True,
-                        choices=['biology','earth_science','economics','pony','psychology','robotics',
-                                 'stackoverflow','sustainable_living','aops','leetcode','theoremqa_theorems',
-                                 'theoremqa_questions'])
+    parser.add_argument('--task', type=str, required=True)
     parser.add_argument('--model', type=str, required=True,
                         choices=['bm25','cohere','e5','google','grit','inst-l','inst-xl',
                                  'openai','qwen','qwen2','sbert','sf','voyage','bge',
-                                 'bge_ce', 'nomic', 'm2', 'contriever', 'reasonir', 'rader', 'diver-retriever'])
+                                 'bge_ce', 'nomic', 'm2', 'contriever', 'reasonir', 'rader', 'diver-retriever', 'qwen3-4b', "inf-retriever-v1"])
     parser.add_argument('--model_id', type=str, default=None, help='(Optional) Pass a different model ID for cache and output path naming.')
     parser.add_argument('--long_context', action='store_true')
     parser.add_argument('--dataset_source', type=str, default='../data/BRIGHT')
@@ -53,6 +50,8 @@ if __name__=='__main__':
         args.output_dir = os.path.join(args.output_dir,f"{args.task}_{args.model_id}_long_{args.long_context}")
     if not os.path.isdir(args.output_dir):
         os.makedirs(args.output_dir)
+    if args.reasoning == 'original':
+        args.reasoning = None
     if args.reasoning is not None:
         score_file_path = os.path.join(args.output_dir,f'{args.reasoning}_score.json')
     else:
@@ -77,13 +76,15 @@ if __name__=='__main__':
         with open(args.input_file) as f:
             examples = json.load(f)
     elif args.reasoning is not None and args.separate_reasoning:
-        examples = load_dataset(dataset_source, 'examples', cache_dir=args.cache_dir)[args.task]
-        reasoning_examples = load_dataset(dataset_source, f"{args.reasoning}_reason", cache_dir=args.cache_dir)[args.task]
-    elif args.reasoning is not None and args.reasoning_length_limit is None:
+        # examples = load_dataset(dataset_source, 'examples')[args.task]
+        examples = load_dataset("parquet", data_files=os.path.join(dataset_source, f"examples/{args.task}-00000-of-00001.parquet"))["train"]
+        # reasoning_examples = load_dataset(dataset_source, f"{args.reasoning}_reason")[args.task]
+        reasoning_examples = load_dataset("parquet", data_files=os.path.join(dataset_source, f"{args.reasoning}_reason", f"{args.task}-00000-of-00001.parquet"))["train"]
+    elif args.reasoning is not None and args.reasoning_length_limit is None:     ### WE ARE HERE
         if args.reasoning in ['xrr2']:
             json_path = os.path.join(dataset_source, f"{args.reasoning}_reason", f"{args.task}_query.json")
             examples = load_dataset("json", data_files=json_path)["train"]
-        elif args.reasoning in ['thinkqe', 'diver-qexpand']:
+        elif args.reasoning in ['thinkqe', 'diver-qexpand', "diver-extra", "qwen-zero-shot-merged", "dpo-merged", "grpo", "dpo-correct-merged", "dpo-query-reason", "INF-X", "gepa-qexpandv2", "TongSearch-QR-1.5B", "TongSearch-QR-3B", "TongSearch-QR-7B"]:
             # examples = load_dataset(dataset_source, 'examples',cache_dir=args.cache_dir)[args.task]  # 包含字典里所有data
             examples = load_dataset("parquet", data_files=os.path.join(dataset_source, f"examples/{args.task}-00000-of-00001.parquet"))["train"]
             # replacing original query with expanded query
@@ -97,6 +98,18 @@ if __name__=='__main__':
                     example["query"] = id_query_dict[example_id]
                 return example
 
+            examples = examples.map(replace_query, num_proc=4)
+        elif args.reasoning == "query_reason":
+            examples = load_dataset("parquet", data_files=os.path.join(dataset_source, f"examples/{args.task}-00000-of-00001.parquet"))["train"]
+            def replace_query(example):
+                example["query"] = example["query"] + "\n<REASON>\n" + example["reasoning"]
+                return example
+            examples = examples.map(replace_query, num_proc=4)
+        elif args.reasoning == "query_answer":
+            examples = load_dataset("parquet", data_files=os.path.join(dataset_source, f"examples/{args.task}-00000-of-00001.parquet"))["train"]
+            def replace_query(example):
+                example["query"] = example["query"] + "\n" + example["gold_answer"]
+                return example
             examples = examples.map(replace_query, num_proc=4)
         else:
             # examples = load_dataset(dataset_source, f"{args.reasoning}_reason", cache_dir=args.cache_dir)[args.task]
@@ -134,7 +147,7 @@ if __name__=='__main__':
 
     if not os.path.isfile(score_file_path):
         print("The scores file does not exist, start retrieving...")
-        if args.model in ['rader', 'reasonir']:
+        if args.model in ['rader']:
             with open(os.path.join(args.config_dir,args.model.split('_ckpt')[0].split('_bilevel')[0],f"{args.task}.json")) as f:
                 config = json.load(f)
         else:
@@ -154,7 +167,11 @@ if __name__=='__main__':
             else:
                 queries.append(e["query"])
             query_ids.append(e['id'])
-            excluded_ids[e['id']] = e['excluded_ids']
+            try:
+                excluded_ids[e['id']] = e['excluded_ids']
+            except KeyError:
+                e['excluded_ids'] = []
+                excluded_ids[e['id']] = e['excluded_ids']
             overlap = set(e['excluded_ids']).intersection(set(e['gold_ids']))
             assert len(overlap)==0
         assert len(queries)==len(query_ids), f"{len(queries)}, {len(query_ids)}"
@@ -215,6 +232,8 @@ if __name__=='__main__':
         key = 'gold_ids'
     ground_truth = {}
     for e in tqdm(examples):
+        if "excluded_ids" not in e:
+            e['excluded_ids'] = []
         ground_truth[e['id']] = {}
         for gid in e[key]:
             ground_truth[e['id']][gid] = 1

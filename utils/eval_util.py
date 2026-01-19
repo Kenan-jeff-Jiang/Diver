@@ -71,3 +71,65 @@ def calculate_retrieval_metrics(results, qrels, k_values=[1, 5, 10, 25, 50, 100]
     print(output)
 
     return output
+
+def calculate_retrieval_metrics_per_query(results, qrels, k_values=[1, 5, 10, 25, 50, 100]):
+    """
+    Calculate per-query retrieval metrics.
+    
+    Args:
+        results: {qid: {'pid': float (retriever score)}}
+        qrels: {qid: {'pid': [0/1] (relevance label)}}
+        k_values: List of k values for metrics
+    
+    Returns:
+        per_query_metrics: {qid: {metric_name: score}}
+    """
+    map_string = "map_cut." + ",".join([str(k) for k in k_values])
+    ndcg_string = "ndcg_cut." + ",".join([str(k) for k in k_values])
+    recall_string = "recall." + ",".join([str(k) for k in k_values])
+    precision_string = "P." + ",".join([str(k) for k in k_values])
+
+    # Evaluate with pytrec_eval
+    evaluator = pytrec_eval.RelevanceEvaluator(
+        qrels, 
+        {map_string, ndcg_string, recall_string, precision_string, "recip_rank"}
+    )
+    scores = evaluator.evaluate(results)
+
+    # Store per-query metrics
+    per_query_metrics = {}
+    for query_id in scores.keys():
+        per_query_metrics[query_id] = {}
+        for k in k_values:
+            per_query_metrics[query_id][f"NDCG@{k}"] = scores[query_id]["ndcg_cut_" + str(k)]
+            per_query_metrics[query_id][f"MAP@{k}"] = scores[query_id]["map_cut_" + str(k)]
+            per_query_metrics[query_id][f"Recall@{k}"] = scores[query_id]["recall_" + str(k)]
+            per_query_metrics[query_id][f"P@{k}"] = scores[query_id]["P_" + str(k)]
+        per_query_metrics[query_id]["MRR"] = scores[query_id]["recip_rank"]
+
+    # Oracle reranker evaluation
+    top_100_ids = {}
+    for query_id in results.keys():
+        sorted_ids = sorted(results[query_id].keys(), key=lambda x: results[query_id][x], reverse=True)
+        top_100_ids[query_id] = set(sorted_ids[:100])
+    
+    oracle_results = {}
+    for query_id in results.keys():
+        oracle_results[query_id] = {}
+        for doc_id in results[query_id].keys():
+            if doc_id in top_100_ids[query_id] and query_id in qrels and doc_id in qrels[query_id]:
+                oracle_results[query_id][doc_id] = qrels[query_id][doc_id]
+            else:
+                oracle_results[query_id][doc_id] = 0
+    
+    oracle_evaluator = pytrec_eval.RelevanceEvaluator(qrels, {ndcg_string})
+    oracle_scores = oracle_evaluator.evaluate(oracle_results)
+    
+    # Add oracle scores to per-query metrics
+    for query_id in oracle_scores.keys():
+        if query_id not in per_query_metrics:
+            per_query_metrics[query_id] = {}
+        for k in k_values:
+            per_query_metrics[query_id][f"Oracle NDCG@{k}"] = oracle_scores[query_id]["ndcg_cut_" + str(k)]
+
+    return per_query_metrics

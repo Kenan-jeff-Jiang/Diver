@@ -1,12 +1,22 @@
+#!/bin/bash
+#SBATCH --job-name=qexpand
+#SBATCH --output=qexpand_qwen2.5.out
+#SBATCH --gres=gpu:1
+#SBATCH --mem=40GB
+#SBATCH --partition=h200
+cd /local/scratch/kjian54/Diver
+source venv/bin/activate
+cd QExpand
+export HF_HOME=/local/scratch/kjian54/hf_cache
 dataset_source="../data/BRIGHT"
-# tasks=("biology" "earth_science" "economics" "psychology" "robotics" "stackoverflow" "sustainable_living" "leetcode" "pony" "aops" "theoremqa_theorems" "theoremqa_questions")
-tasks=("biology")
+tasks=("biology" "earth_science" "economics" "psychology" "robotics" "stackoverflow" "sustainable_living" "leetcode" "pony" "aops" "theoremqa_theorems" "theoremqa_questions")
+# tasks=("Biology" "Bioinformatics" "Medical-Sciences" "MedXpertQA-Exam" "MedQA-Diag" "PMC-Treatment" "PMC-Clinical" "IIYi-Clinical")
 
-model_path="../model/Diver-Retriever-4B".  # retriever model path
-generation_model_path="../model/DeepSeek-R1-Distill-Qwen-14B"
+model_path="AQ-MedAI/Diver-Retriever-4B-1020" # retriever model path 
+generation_model_path="Qwen/Qwen2.5-1.5B-Instruct" # Qwen/Qwen3-4B-Instruct-2507
 
 model_name=diver-retriever
-REASONING=diver-qexpand  # query expansion method
+REASONING=diver-qexpand-qwen-2.5  # query expansion method
 NUM_INTERACTION=2
 KEEP_PASSAGE_NUM=5
 GEN_NUM=1
