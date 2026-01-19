@@ -1,0 +1,74 @@
+####################
+# Python
+####################
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+####################
+# Virtual env
+####################
+venv/
+.env/
+.env.*
+
+####################
+# Logs & outputs
+####################
+*.out
+*.log
+*.err
+*.txt
+
+####################
+# Experiment outputs / caches
+####################
+output/
+outputs/
+cache/
+cached/
+results/
+
+####################
+# Data (large / regenerated)
+####################
+data/
+data/**
+
+####################
+# Model & embedding artifacts
+####################
+*.pt
+*.bin
+*.ckpt
+*.safetensors
+
+####################
+# Jupyter
+####################
+.ipynb_checkpoints/
+
+####################
+# HPC / SLURM
+####################
+slurm-*.out
+slurm-*.err
+
+####################
+# vLLM / inference artifacts
+####################
+vllm_server.out
+vllm/
+
+####################
+# Repo-specific (from your status)
+####################
+Retriever/output/
+Retriever/r2med_output/
+Retriever/__pycache__/
+QExpand/output/
+QExpand/__pycache__/
+utils/__pycache__/
